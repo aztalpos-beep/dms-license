@@ -109,10 +109,16 @@ router.post('/license/verify', asyncRoute(async (req, res) => {
   }
 
   // Log heartbeat — server_time is authoritative, client_claimed_time only logged for anomaly detection
+  // MySQL's DATETIME column rejects a raw ISO string like "2026-09-19T08:29:21.588Z" —
+  // it needs "2026-09-19 08:29:21" format, hence the conversion below.
+  const clientClaimedTimeForDb = client_claimed_time
+    ? new Date(client_claimed_time).toISOString().slice(0, 19).replace('T', ' ')
+    : null;
+
   await db.query(
     `INSERT INTO license_heartbeats (license_id, device_id, server_time, client_claimed_time, ip_address)
      VALUES (?, ?, ?, ?, ?)`,
-    [license.license_id, device_id, serverNow, client_claimed_time || null, req.ip]
+    [license.license_id, device_id, serverNow, clientClaimedTimeForDb, req.ip]
   );
 
   // Anomaly signal (optional): if client_claimed_time is wildly behind server time,
