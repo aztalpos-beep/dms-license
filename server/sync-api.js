@@ -9,6 +9,17 @@ const express = require('express');
 const db = require('./db');
 const router = express.Router();
 
+// Same safety net as license-api.js — prevents an unguarded route from
+// crashing the whole server process on a transient DB error.
+function asyncRoute(handler) {
+  return (req, res, next) => {
+    Promise.resolve(handler(req, res, next)).catch((err) => {
+      console.error('[sync-api] error:', err.message);
+      if (!res.headersSent) res.status(500).json({ error: 'internal_error' });
+    });
+  };
+}
+
 /**
  * POST /sync/push
  * body: {
@@ -20,7 +31,7 @@ const router = express.Router();
  *   ]
  * }
  */
-router.post('/sync/push', async (req, res) => {
+router.post('/sync/push', asyncRoute(async (req, res) => {
   const { device_id, transactions } = req.body;
   if (!device_id || !Array.isArray(transactions)) {
     return res.status(400).json({ error: 'device_id and transactions[] required' });
@@ -38,7 +49,7 @@ router.post('/sync/push', async (req, res) => {
   }
 
   res.json({ results, server_time: new Date().toISOString() });
-});
+}));
 
 async function applyTransaction(device_id, tx) {
   const { table, op, record, record_id } = tx;
@@ -95,7 +106,7 @@ async function applyTransaction(device_id, tx) {
  * Returns changes from OTHER devices (or the cloud dashboard) that this
  * device hasn't seen yet, so multi-PC / cloud-initiated changes flow back down.
  */
-router.get('/sync/pull', async (req, res) => {
+router.get('/sync/pull', asyncRoute(async (req, res) => {
   const { device_id, since } = req.query;
   if (!device_id || !since) return res.status(400).json({ error: 'device_id and since required' });
 
@@ -110,6 +121,6 @@ router.get('/sync/pull', async (req, res) => {
   }
 
   res.json({ changes, server_time: new Date().toISOString() });
-});
+}));
 
 module.exports = router;

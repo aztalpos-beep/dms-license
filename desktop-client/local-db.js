@@ -1,70 +1,104 @@
-// local-db.js — SQLite wrapper (better-sqlite3) covering TWO needs:
-//   1. simple get/set(key, value) — used by license-store.js / license-guard.js
-//   2. generic insert/run/all/get(sql) — used by sync-engine.js for the
-//      actual POS tables (sales, payments, sync_queue, etc.)
-// Loads local-schema.sql on first run so all tables exist before use.
+// local-db.js — JSON-file-backed local store. No native compilation needed
+// (unlike better-sqlite3, which requires Visual Studio Build Tools on Windows).
+//
+// Covers TWO needs:
+//   1. simple get/set(key, value)  — used by license-store.js / license-guard.js
+//   2. a minimal table interface   — used by sync-engine.js for POS records
+//
+// This is intentionally simple (whole file rewritten on each write) — fine for
+// a single-user desktop POS's data volume. If you later want a real relational
+// engine, swap this file for better-sqlite3 once Visual Studio Build Tools (or
+// the "Desktop development with C++" workload) is installed — nothing else
+// needs to change, since license-guard.js / sync-engine.js only use the
+// methods below (get/set/insert/run/all/queryOne).
 
-const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 
 class LocalDb {
   constructor(dbPath) {
-    this.db = new Database(dbPath || path.join(__dirname, 'dms-local.db'));
-    this.db.pragma('journal_mode = WAL'); // safer for a POS that writes constantly
+    this.filePath = dbPath || path.join(__dirname, 'dms-local.json');
+    this.data = this._load();
+  }
 
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS kv_store (
-        key TEXT PRIMARY KEY,
-        value TEXT
-      );
-    `);
-
-    const schemaPath = path.join(__dirname, 'local-schema.sql');
-    if (fs.existsSync(schemaPath)) {
-      this.db.exec(fs.readFileSync(schemaPath, 'utf8'));
+  _load() {
+    if (fs.existsSync(this.filePath)) {
+      try {
+        return JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
+      } catch {
+        return { kv: {}, tables: {} };
+      }
     }
+    return { kv: {}, tables: {} };
+  }
 
-    this._getKvStmt = this.db.prepare('SELECT value FROM kv_store WHERE key = ?');
-    this._setKvStmt = this.db.prepare(
-      'INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
-    );
+  _save() {
+    fs.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2), 'utf8');
   }
 
   // --- simple key/value interface (license module) ---
   async get(key) {
-    const row = this._getKvStmt.get(key);
-    return row ? row.value : null;
+    return Object.prototype.hasOwnProperty.call(this.data.kv, key) ? this.data.kv[key] : null;
   }
 
   async set(key, value) {
-    this._setKvStmt.run(key, value);
+    this.data.kv[key] = value;
+    this._save();
     return true;
   }
 
-  // --- generic relational interface (sync engine / POS tables) ---
-  /** Insert a full record object into `table`. Columns must already exist in local-schema.sql. */
+  // --- minimal table interface (sync engine / POS records) ---
+  _table(name) {
+    if (!this.data.tables[name]) this.data.tables[name] = [];
+    return this.data.tables[name];
+  }
+
   async insert(table, record) {
-    const columns = Object.keys(record);
-    const placeholders = columns.map(() => '?').join(', ');
-    const sql = `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`;
-    this.db.prepare(sql).run(...columns.map((c) => record[c]));
+    this._table(table).push(record);
+    this._save();
     return record;
   }
 
-  /** Run an arbitrary write statement (UPDATE/INSERT/etc.) with positional params. */
   async run(sql, params = []) {
-    return this.db.prepare(sql).run(...params);
+    const updateMatch = sql.match(/UPDATE\s+(\w+)\s+SET\s+(\w+)\s*=\s*\?\s+WHERE\s+id\s*=\s*\?/i);
+    if (updateMatch) {
+      const [, table, col] = updateMatch;
+      const [value, id] = params;
+      const rows = this._table(table);
+      const row = rows.find((r) => r.id === id);
+      if (row) row[col] = value;
+      this._save();
+      return { changes: row ? 1 : 0 };
+    }
+    const deleteMatch = sql.match(/DELETE FROM\s+(\w+)\s+WHERE\s+id\s*=\s*\?/i);
+    if (deleteMatch) {
+      const [, table] = deleteMatch;
+      const [id] = params;
+      const before = this._table(table).length;
+      this.data.tables[table] = this._table(table).filter((r) => r.id !== id);
+      this._save();
+      return { changes: before - this.data.tables[table].length };
+    }
+    throw new Error(`local-db.js: unsupported SQL pattern for run(): ${sql}`);
   }
 
-  /** Run a SELECT returning one row (or undefined). */
   async queryOne(sql, params = []) {
-    return this.db.prepare(sql).get(...params);
+    const match = sql.match(/FROM\s+(\w+)/i);
+    if (!match) throw new Error(`local-db.js: unsupported SQL pattern for queryOne(): ${sql}`);
+    const [id] = params;
+    return this._table(match[1]).find((r) => r.id === id);
   }
 
-  /** Run a SELECT returning all matching rows. */
   async all(sql, params = []) {
-    return this.db.prepare(sql).all(...params);
+    const fromMatch = sql.match(/FROM\s+(\w+)/i);
+    if (!fromMatch) throw new Error(`local-db.js: unsupported SQL pattern for all(): ${sql}`);
+    const rows = this._table(fromMatch[1]);
+    const whereMatch = sql.match(/WHERE\s+(\w+)\s*=\s*\?/i);
+    if (whereMatch && params.length) {
+      const col = whereMatch[1];
+      return rows.filter((r) => r[col] === params[0]);
+    }
+    return rows;
   }
 }
 

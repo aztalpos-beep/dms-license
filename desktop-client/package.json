@@ -2,12 +2,12 @@
   "name": "dms-desktop-client",
   "version": "1.0.0",
   "description": "DMS POS desktop client — license/trial module",
-  "main": "main-integration-example.js",
+  "main": "main.js",
   "scripts": {
     "start": "electron ."
   },
   "dependencies": {
-    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5",
     "uuid": "^9.0.1"
   },
   "devDependencies": {

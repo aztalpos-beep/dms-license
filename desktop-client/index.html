@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>DMS POS</title>
+  <style>
+    body {
+      font-family: -apple-system, Segoe UI, Arial, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .card {
+      background: #1e293b;
+      padding: 2rem 3rem;
+      border-radius: 12px;
+      text-align: center;
+      max-width: 480px;
+    }
+    .status-ok { color: #4ade80; font-size: 1.2rem; font-weight: 600; }
+    .status-blocked { color: #f87171; font-size: 1.2rem; font-weight: 600; }
+    .detail { color: #94a3b8; margin-top: 0.75rem; font-size: 0.9rem; }
+    button {
+      margin-top: 1.5rem;
+      padding: 0.5rem 1.25rem;
+      border: none;
+      border-radius: 6px;
+      background: #3b82f6;
+      color: white;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>DMS POS</h2>
+    <div id="status">Checking license…</div>
+    <div id="detail" class="detail"></div>
+    <button onclick="recheck()">Check again</button>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const detailEl = document.getElementById('detail');
+
+    window.dmsLicense.onOk((result) => {
+      statusEl.textContent = '✅ License OK';
+      statusEl.className = 'status-ok';
+      detailEl.textContent = `Source: ${result.source} — ${result.reason}`;
+    });
+
+    window.dmsLicense.onBlocked((result) => {
+      statusEl.textContent = '⛔ Blocked';
+      statusEl.className = 'status-blocked';
+      detailEl.textContent = result.message || result.reason;
+    });
+
+    async function recheck() {
+      statusEl.textContent = 'Checking license…';
+      statusEl.className = '';
+      detailEl.textContent = '';
+      const result = await window.dmsLicense.checkNow();
+      if (result.allowed) {
+        statusEl.textContent = '✅ License OK';
+        statusEl.className = 'status-ok';
+        detailEl.textContent = `Source: ${result.source} — ${result.reason}`;
+      } else {
+        statusEl.textContent = '⛔ Blocked';
+        statusEl.className = 'status-blocked';
+        detailEl.textContent = result.message || result.reason;
+      }
+    }
+  </script>
+</body>
+</html>

@@ -4,6 +4,15 @@
 // as long as it exposes an async `query(sql, params)` that returns rows.
 
 const mysql = require('mysql2/promise');
+const fs = require('fs');
+
+function buildSslConfig() {
+  if (process.env.DB_SSL !== 'true') return undefined;
+  if (process.env.CA_CERT_PATH && fs.existsSync(process.env.CA_CERT_PATH)) {
+    return { ca: fs.readFileSync(process.env.CA_CERT_PATH, 'utf8') };
+  }
+  return { rejectUnauthorized: false }; // encrypted, CA not verified — set CA_CERT_PATH for production
+}
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
@@ -11,7 +20,7 @@ const pool = mysql.createPool({
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: true } : undefined, // Aiven needs SSL
+  ssl: buildSslConfig(), // Aiven needs SSL
   waitForConnections: true,
   connectionLimit: 10,
 });

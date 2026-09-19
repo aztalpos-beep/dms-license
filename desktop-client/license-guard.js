@@ -46,13 +46,20 @@ class LicenseGuard {
           device_id: this.deviceId,
           client_claimed_time: new Date().toISOString(), // logged for anomaly detection only, not trusted
         }),
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(30000), // Render free-tier cold starts can take 20-30s
       });
-      if (!res.ok) return false;
+      if (!res.ok) {
+        console.error('[license] /license/verify returned', res.status, await res.text().catch(() => ''));
+        return false;
+      }
       const verdict = await res.json();
-      await this.store.saveVerdict(verdict);
+      const saved = await this.store.saveVerdict(verdict).catch((err) => {
+        console.error('[license] saveVerdict failed (signature check?):', err.message);
+        throw err;
+      });
       return true;
-    } catch {
+    } catch (err) {
+      console.error('[license] refreshFromServer failed:', err.message || err);
       return false; // offline or server unreachable — fall through to cached verdict
     }
   }

@@ -13,12 +13,26 @@ const router = express.Router();
 
 const GRACE_PERIOD_HOURS = 48; // max time client can run without contacting server
 
+// Wraps an async route handler so a thrown/rejected error becomes a clean 500
+// response instead of an unhandled promise rejection that crashes the whole
+// Node process (which is what was happening before — any transient DB hiccup
+// took the entire server down, causing Render to restart it and every request
+// hitting it mid-restart to see a 502).
+function asyncRoute(handler) {
+  return (req, res, next) => {
+    Promise.resolve(handler(req, res, next)).catch((err) => {
+      console.error('[license-api] error:', err.message);
+      if (!res.headersSent) res.status(500).json({ error: 'internal_error' });
+    });
+  };
+}
+
 /**
  * POST /license/register
  * First run on a new device. Registers hw_fingerprint, creates a trial license
  * if this fingerprint has never been seen before (blocks "reinstall = new trial").
  */
-router.post('/license/register', async (req, res) => {
+router.post('/license/register', asyncRoute(async (req, res) => {
   const { hw_fingerprint, device_id_hint } = req.body;
   if (!hw_fingerprint) return res.status(400).json({ error: 'hw_fingerprint required' });
 
@@ -44,14 +58,14 @@ router.post('/license/register', async (req, res) => {
   // same hardware trying to "reinstall for a fresh trial" just gets its existing record back.
 
   return res.json({ device_id: device[0].device_id });
-});
+}));
 
 /**
  * POST /license/verify
  * Called on every app launch AND periodically while running (heartbeat).
  * Returns a SIGNED verdict. Client cannot alter it without breaking the signature.
  */
-router.post('/license/verify', async (req, res) => {
+router.post('/license/verify', asyncRoute(async (req, res) => {
   const { device_id, client_claimed_time } = req.body;
   if (!device_id) return res.status(400).json({ error: 'device_id required' });
 
@@ -116,6 +130,6 @@ router.post('/license/verify', async (req, res) => {
   });
 
   return res.json(verdict);
-});
+}));
 
 module.exports = router;
