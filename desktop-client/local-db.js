@@ -1,16 +1,14 @@
 // local-db.js — JSON-file-backed local store. No native compilation needed
 // (unlike better-sqlite3, which requires Visual Studio Build Tools on Windows).
 //
-// Covers TWO needs:
-//   1. simple get/set(key, value)  — used by license-store.js / license-guard.js
-//   2. a minimal table interface   — used by sync-engine.js for POS records
+// Provides plain JS methods (no SQL strings) used by:
+//   - license-store.js / license-guard.js  -> get(key) / set(key, value)
+//   - sync-engine.js                       -> insert / findPending / updateByRecordId /
+//                                              upsertByRecordId / getAll / getMeta / setMeta
 //
-// This is intentionally simple (whole file rewritten on each write) — fine for
-// a single-user desktop POS's data volume. If you later want a real relational
-// engine, swap this file for better-sqlite3 once Visual Studio Build Tools (or
-// the "Desktop development with C++" workload) is installed — nothing else
-// needs to change, since license-guard.js / sync-engine.js only use the
-// methods below (get/set/insert/run/all/queryOne).
+// If you later move to a real relational engine (better-sqlite3, once Visual
+// Studio Build Tools are installed), keep these exact method names/shapes and
+// nothing else in license-guard.js or sync-engine.js needs to change.
 
 const fs = require('fs');
 const path = require('path');
@@ -24,16 +22,22 @@ class LocalDb {
   _load() {
     if (fs.existsSync(this.filePath)) {
       try {
-        return JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
+        const parsed = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
+        return { kv: {}, meta: {}, tables: {}, ...parsed };
       } catch {
-        return { kv: {}, tables: {} };
+        return { kv: {}, meta: {}, tables: {} }; // corrupted file — start fresh rather than crash
       }
     }
-    return { kv: {}, tables: {} };
+    return { kv: {}, meta: {}, tables: {} };
   }
 
   _save() {
     fs.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2), 'utf8');
+  }
+
+  _table(name) {
+    if (!this.data.tables[name]) this.data.tables[name] = [];
+    return this.data.tables[name];
   }
 
   // --- simple key/value interface (license module) ---
@@ -47,58 +51,66 @@ class LocalDb {
     return true;
   }
 
-  // --- minimal table interface (sync engine / POS records) ---
-  _table(name) {
-    if (!this.data.tables[name]) this.data.tables[name] = [];
-    return this.data.tables[name];
+  // --- small separate namespace for sync-engine bookkeeping (last_pull_at etc.) ---
+  async getMeta(key) {
+    return Object.prototype.hasOwnProperty.call(this.data.meta, key) ? this.data.meta[key] : null;
   }
 
+  async setMeta(key, value) {
+    this.data.meta[key] = value;
+    this._save();
+    return true;
+  }
+
+  // --- table interface (POS records + sync queue) ---
+
+  /** Insert a full record object into `table`. */
   async insert(table, record) {
     this._table(table).push(record);
     this._save();
     return record;
   }
 
-  async run(sql, params = []) {
-    const updateMatch = sql.match(/UPDATE\s+(\w+)\s+SET\s+(\w+)\s*=\s*\?\s+WHERE\s+id\s*=\s*\?/i);
-    if (updateMatch) {
-      const [, table, col] = updateMatch;
-      const [value, id] = params;
-      const rows = this._table(table);
-      const row = rows.find((r) => r.id === id);
-      if (row) row[col] = value;
-      this._save();
-      return { changes: row ? 1 : 0 };
-    }
-    const deleteMatch = sql.match(/DELETE FROM\s+(\w+)\s+WHERE\s+id\s*=\s*\?/i);
-    if (deleteMatch) {
-      const [, table] = deleteMatch;
-      const [id] = params;
-      const before = this._table(table).length;
-      this.data.tables[table] = this._table(table).filter((r) => r.id !== id);
-      this._save();
-      return { changes: before - this.data.tables[table].length };
-    }
-    throw new Error(`local-db.js: unsupported SQL pattern for run(): ${sql}`);
+  /** All rows currently in `table`, in insertion order. */
+  async getAll(table) {
+    return [...this._table(table)];
   }
 
-  async queryOne(sql, params = []) {
-    const match = sql.match(/FROM\s+(\w+)/i);
-    if (!match) throw new Error(`local-db.js: unsupported SQL pattern for queryOne(): ${sql}`);
-    const [id] = params;
-    return this._table(match[1]).find((r) => r.id === id);
+  /**
+   * Rows where row[field] === value, oldest-first by created_at, capped at limit.
+   * (Mirrors: SELECT * FROM table WHERE field = value ORDER BY created_at ASC LIMIT limit)
+   */
+  async findPending(table, field, value, limit = 50) {
+    return this._table(table)
+      .filter((r) => r[field] === value)
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      .slice(0, limit);
   }
 
-  async all(sql, params = []) {
-    const fromMatch = sql.match(/FROM\s+(\w+)/i);
-    if (!fromMatch) throw new Error(`local-db.js: unsupported SQL pattern for all(): ${sql}`);
-    const rows = this._table(fromMatch[1]);
-    const whereMatch = sql.match(/WHERE\s+(\w+)\s*=\s*\?/i);
-    if (whereMatch && params.length) {
-      const col = whereMatch[1];
-      return rows.filter((r) => r[col] === params[0]);
+  /** Merge `updates` into the row matching record_id. Returns true if a row was updated. */
+  async updateByRecordId(table, record_id, updates) {
+    const row = this._table(table).find((r) => r.record_id === record_id);
+    if (!row) return false;
+    Object.assign(row, updates);
+    this._save();
+    return true;
+  }
+
+  /**
+   * Insert `record` if no row with the same record_id exists yet, otherwise
+   * merge the new fields into the existing row. Used when pulling changes
+   * made by other devices/the cloud — safe to apply the same change twice.
+   */
+  async upsertByRecordId(table, record) {
+    const rows = this._table(table);
+    const existing = rows.find((r) => r.record_id === record.record_id);
+    if (existing) {
+      Object.assign(existing, record);
+    } else {
+      rows.push(record);
     }
-    return rows;
+    this._save();
+    return record;
   }
 }
 

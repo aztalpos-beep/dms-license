@@ -8,72 +8,179 @@
       font-family: -apple-system, Segoe UI, Arial, sans-serif;
       background: #0f172a;
       color: #e2e8f0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
       margin: 0;
+      padding: 2rem;
     }
+    h1 { font-size: 1.3rem; margin-bottom: 0.25rem; }
+    .row { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 1.5rem; }
     .card {
       background: #1e293b;
-      padding: 2rem 3rem;
-      border-radius: 12px;
-      text-align: center;
-      max-width: 480px;
+      padding: 1.25rem 1.5rem;
+      border-radius: 10px;
+      flex: 1;
+      min-width: 260px;
     }
-    .status-ok { color: #4ade80; font-size: 1.2rem; font-weight: 600; }
-    .status-blocked { color: #f87171; font-size: 1.2rem; font-weight: 600; }
-    .detail { color: #94a3b8; margin-top: 0.75rem; font-size: 0.9rem; }
+    .card h3 { margin-top: 0; font-size: 1rem; color: #93c5fd; }
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 0.5rem;
+      margin: 0.35rem 0;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
     button {
-      margin-top: 1.5rem;
-      padding: 0.5rem 1.25rem;
+      margin-top: 0.5rem;
+      padding: 0.5rem 1rem;
       border: none;
       border-radius: 6px;
       background: #3b82f6;
       color: white;
       cursor: pointer;
+      font-size: 0.9rem;
     }
+    button:hover { background: #2563eb; }
+    button.secondary { background: #475569; }
+    .status-ok { color: #4ade80; font-weight: 600; }
+    .status-blocked { color: #f87171; font-weight: 600; }
+    .detail, .hint { color: #94a3b8; font-size: 0.85rem; margin-top: 0.25rem; }
+    .log {
+      margin-top: 0.75rem;
+      font-size: 0.8rem;
+      color: #cbd5e1;
+      max-height: 140px;
+      overflow-y: auto;
+      background: #0f172a;
+      border-radius: 6px;
+      padding: 0.5rem;
+    }
+    .log div { padding: 2px 0; border-bottom: 1px solid #1e293b; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; margin-right: 6px; }
+    .badge.pending { background: #78350f; color: #fde68a; }
+    .badge.synced { background: #14532d; color: #86efac; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h2>DMS POS</h2>
-    <div id="status">Checking license…</div>
-    <div id="detail" class="detail"></div>
-    <button onclick="recheck()">Check again</button>
+  <h1>DMS POS</h1>
+  <div id="license-status">Checking license…</div>
+  <div id="license-detail" class="detail"></div>
+
+  <div class="row">
+    <div class="card">
+      <h3>💰 New Sale</h3>
+      <input id="sale-amount" type="number" placeholder="Total amount" />
+      <input id="sale-note" type="text" placeholder="Note (optional)" />
+      <button onclick="createSale()">Save Sale (works offline)</button>
+      <div id="sale-log" class="log"></div>
+    </div>
+
+    <div class="card">
+      <h3>📦 Inventory Adjustment</h3>
+      <input id="inv-item" type="text" placeholder="Item ID (e.g. item-001)" />
+      <input id="inv-delta" type="number" placeholder="Delta qty (e.g. -2 for sale, +10 for stock-in)" />
+      <input id="inv-reason" type="text" placeholder="Reason (optional)" />
+      <button onclick="adjustInventory()">Save Adjustment (works offline)</button>
+      <div class="hint">Current computed stock for that item: <span id="inv-stock">–</span></div>
+      <div id="inv-log" class="log"></div>
+    </div>
+
+    <div class="card">
+      <h3>🔄 Sync Status</h3>
+      <div class="hint">
+        <span class="badge pending">Pending: <span id="q-pending">0</span></span>
+        <span class="badge synced">Synced: <span id="q-synced">0</span></span>
+      </div>
+      <div class="hint" style="margin-top:0.5rem;">Total queued (all time): <span id="q-total">0</span></div>
+      <button class="secondary" onclick="forceSync()">Force sync now</button>
+      <div class="hint" style="margin-top:0.5rem;">
+        Auto-syncs every 15s when online. Turn off your internet, save a Sale,
+        then turn it back on and watch "Pending" drop as it syncs.
+      </div>
+    </div>
   </div>
 
   <script>
-    const statusEl = document.getElementById('status');
-    const detailEl = document.getElementById('detail');
+    const statusEl = document.getElementById('license-status');
+    const detailEl = document.getElementById('license-detail');
 
-    window.dmsLicense.onOk((result) => {
-      statusEl.textContent = '✅ License OK';
-      statusEl.className = 'status-ok';
-      detailEl.textContent = `Source: ${result.source} — ${result.reason}`;
-    });
+    function renderLicense(result, ok) {
+      statusEl.textContent = ok ? '✅ License OK' : '⛔ Blocked';
+      statusEl.className = ok ? 'status-ok' : 'status-blocked';
+      detailEl.textContent = ok
+        ? `Source: ${result.source} — ${result.reason}`
+        : (result.message || result.reason);
+    }
 
-    window.dmsLicense.onBlocked((result) => {
-      statusEl.textContent = '⛔ Blocked';
-      statusEl.className = 'status-blocked';
-      detailEl.textContent = result.message || result.reason;
-    });
+    window.dmsLicense.onOk((result) => renderLicense(result, true));
+    window.dmsLicense.onBlocked((result) => renderLicense(result, false));
 
-    async function recheck() {
-      statusEl.textContent = 'Checking license…';
-      statusEl.className = '';
-      detailEl.textContent = '';
-      const result = await window.dmsLicense.checkNow();
-      if (result.allowed) {
-        statusEl.textContent = '✅ License OK';
-        statusEl.className = 'status-ok';
-        detailEl.textContent = `Source: ${result.source} — ${result.reason}`;
-      } else {
-        statusEl.textContent = '⛔ Blocked';
-        statusEl.className = 'status-blocked';
-        detailEl.textContent = result.message || result.reason;
+    function logLine(elId, text) {
+      const el = document.getElementById(elId);
+      const line = document.createElement('div');
+      line.textContent = `${new Date().toLocaleTimeString()} — ${text}`;
+      el.prepend(line);
+    }
+
+    async function createSale() {
+      const total_amount = document.getElementById('sale-amount').value;
+      const note = document.getElementById('sale-note').value;
+      if (!total_amount) return;
+      try {
+        const record = await window.dmsPos.createSale({ total_amount, note });
+        logLine('sale-log', `Saved locally ✅ record_id: ${record.record_id.slice(0, 8)}…`);
+        document.getElementById('sale-amount').value = '';
+        document.getElementById('sale-note').value = '';
+        refreshQueueStatus();
+      } catch (err) {
+        logLine('sale-log', `Error: ${err.message}`);
       }
     }
+
+    async function adjustInventory() {
+      const item_id = document.getElementById('inv-item').value;
+      const delta_qty = document.getElementById('inv-delta').value;
+      const reason = document.getElementById('inv-reason').value;
+      if (!item_id || !delta_qty) return;
+      try {
+        const record = await window.dmsPos.adjustInventory({ item_id, delta_qty, reason });
+        logLine('inv-log', `Saved locally ✅ record_id: ${record.record_id.slice(0, 8)}…`);
+        document.getElementById('inv-delta').value = '';
+        document.getElementById('inv-reason').value = '';
+        refreshStock(item_id);
+        refreshQueueStatus();
+      } catch (err) {
+        logLine('inv-log', `Error: ${err.message}`);
+      }
+    }
+
+    async function refreshStock(item_id) {
+      if (!item_id) return;
+      const stock = await window.dmsPos.getStock(item_id);
+      document.getElementById('inv-stock').textContent = stock;
+    }
+
+    document.getElementById('inv-item').addEventListener('change', (e) => refreshStock(e.target.value));
+
+    async function refreshQueueStatus() {
+      const status = await window.dmsPos.getQueueStatus();
+      document.getElementById('q-pending').textContent = status.pending;
+      document.getElementById('q-synced').textContent = status.synced;
+      document.getElementById('q-total').textContent = status.total;
+    }
+
+    async function forceSync() {
+      logLine('sale-log', 'Forcing sync…');
+      const status = await window.dmsPos.forceSyncNow();
+      document.getElementById('q-pending').textContent = status.pending;
+      document.getElementById('q-synced').textContent = status.synced;
+      document.getElementById('q-total').textContent = status.total;
+      logLine('sale-log', 'Sync attempt done.');
+    }
+
+    setInterval(refreshQueueStatus, 5000);
+    refreshQueueStatus();
   </script>
 </body>
 </html>

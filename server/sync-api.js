@@ -54,6 +54,21 @@ router.post('/sync/push', asyncRoute(async (req, res) => {
 async function applyTransaction(device_id, tx) {
   const { table, op, record, record_id } = tx;
 
+  // The client's record includes record_id/device_id/created_at alongside the
+  // business fields (see sync-engine.js's writeAndQueue). record_id and
+  // device_id are already bound as separate params below, so they're
+  // stripped here to avoid inserting the same column twice. created_at is
+  // converted from the client's ISO string ("...T...Z") to MySQL's
+  // "YYYY-MM-DD HH:MM:SS" — same fix as license-api.js's client_claimed_time.
+  function cleanColumns(rawRecord) {
+    const { record_id: _rid, device_id: _did, created_at, ...businessFields } = rawRecord;
+    const out = { ...businessFields };
+    if (created_at) {
+      out.created_at = new Date(created_at).toISOString().slice(0, 19).replace('T', ' ');
+    }
+    return out;
+  }
+
   // Append-only tables: Sale, Payment, Expense, Cashbook entries.
   // Idempotent insert — if this UUID already exists (e.g. client retried after
   // a dropped response), we don't duplicate it, we just confirm it's synced.
@@ -64,12 +79,13 @@ async function applyTransaction(device_id, tx) {
     if (existing.length > 0) {
       return { note: 'already existed, no-op (idempotent retry)' };
     }
-    const columns = Object.keys(record);
+    const cleaned = cleanColumns(record);
+    const columns = Object.keys(cleaned);
     const placeholders = columns.map(() => '?').join(', ');
     await db.query(
       `INSERT INTO ${table} (record_id, device_id, ${columns.join(', ')}, synced_at)
        VALUES (?, ?, ${placeholders}, NOW())`,
-      [record_id, device_id, ...columns.map((c) => record[c])]
+      [record_id, device_id, ...columns.map((c) => cleaned[c])]
     );
     return { note: 'inserted' };
   }
@@ -85,12 +101,13 @@ async function applyTransaction(device_id, tx) {
     if (existing.length > 0) {
       return { note: 'already existed, no-op (idempotent retry)' };
     }
-    const columns = Object.keys(record); // expect e.g. item_id, delta_qty, reason
+    const cleaned = cleanColumns(record); // expect e.g. item_id, delta_qty, reason
+    const columns = Object.keys(cleaned);
     const placeholders = columns.map(() => '?').join(', ');
     await db.query(
       `INSERT INTO ${table} (record_id, device_id, ${columns.join(', ')}, synced_at)
        VALUES (?, ?, ${placeholders}, NOW())`,
-      [record_id, device_id, ...columns.map((c) => record[c])]
+      [record_id, device_id, ...columns.map((c) => cleaned[c])]
     );
     // Current stock/balance is always COMPUTED as SUM(delta) on read,
     // e.g.: SELECT SUM(delta_qty) FROM inventory_adjustments WHERE item_id = ?
@@ -110,13 +127,17 @@ router.get('/sync/pull', asyncRoute(async (req, res) => {
   const { device_id, since } = req.query;
   if (!device_id || !since) return res.status(400).json({ error: 'device_id and since required' });
 
+  // Same conversion needed here as license-api.js's client_claimed_time fix —
+  // MySQL DATETIME comparisons want "YYYY-MM-DD HH:MM:SS", not a raw ISO string.
+  const sinceForDb = new Date(since).toISOString().slice(0, 19).replace('T', ' ');
+
   const tables = ['sales', 'payments', 'expenses', 'cashbook_entries', 'recoveries', 'inventory_adjustments', 'customer_ledger'];
   const changes = {};
 
   for (const table of tables) {
     changes[table] = await db.query(
       `SELECT * FROM ${table} WHERE synced_at > ? AND device_id != ? ORDER BY synced_at ASC LIMIT 500`,
-      [since, device_id]
+      [sinceForDb, device_id]
     );
   }
 

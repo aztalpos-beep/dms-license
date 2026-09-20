@@ -1,6 +1,8 @@
 {
   "kv": {
-    "device_id": "058f1055-db6e-48cb-b7b1-b4cd34a82835"
+    "device_id": "058f1055-db6e-48cb-b7b1-b4cd34a82835",
+    "license_verdict": "{\"device_id\":\"058f1055-db6e-48cb-b7b1-b4cd34a82835\",\"license_id\":\"a359d315-5d54-4f04-bb7d-a3c7098f5265\",\"status\":\"active\",\"plan_type\":\"trial\",\"expires_at\":\"2026-09-22T08:25:04.000Z\",\"server_time\":\"2026-09-19T08:41:15.665Z\",\"nonce\":\"8a7743a457fc9dce\",\"signature\":\"18690733b1e03d33ea9e1f3013389eb19b6bce06bdb5a5cbcfe6ac0ffdaf464cf9c16432100f509cf7596ae020862f6428032c3e6c1d3239a8cb73900d2430138dc6428b7a0c701a76b14714b73cc32081b8bf64776a72445a5750e3bb2a6b3a23c477cdec6ae4d76a0e4e98e1f5e1adc452e29cb94e04d05659733f2122adede70761f0c01bda64c2921bae472142cfb07bfa76cefc41f24da219ebe2a175962f9ee0bd27574ba49de699f6e60122c1e7cc30292ff84d94c93b06c6968687fe09b28841cb4c34312ee8912cb6129d0032307886c607f5d27af11d6f0cdac4b1b869b2af81caed6d843115a2ad8956d197911173ba94aa7fa4a4a2aca4e565c7\"}",
+    "license_last_saved_at_iso": "2026-09-19T08:41:16.186Z"
   },
   "tables": {}
 }

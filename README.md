@@ -126,21 +126,39 @@ curl -X POST http://localhost:4000/license/verify \
 ```
 If both calls return clean JSON, the server half is done and correct.
 
-**4. Desktop client**
+**4. Desktop client (ready to run)**
 ```bash
 cd ../desktop-client
-npm install
+mkdir -p keys
 ```
-Wire `main-integration-example.js` into your actual Electron `main.js` (or
-rename it), point `preload.js` in your `BrowserWindow` config, and in your
-React UI listen for `window.dmsLicense.onBlocked(...)` to show a lock screen,
-and call `window.dmsLicense.checkNow()` before letting a new Sale be created.
+Copy the public key generated on the server side:
+```bash
+cp ../server/keys/public.pem ./keys/public.pem
+```
+Set which backend URL the app talks to:
+```bash
+cp .env.example .env
+# edit .env: DMS_CLOUD_API=https://your-service.onrender.com
+```
+Install and run:
+```bash
+npm install
+npm start
+```
+This opens a small window showing live license status (✅ OK / ⛔ Blocked with
+a reason) — confirms `main.js` → `license-guard.js` → your deployed backend
+are all wired correctly. Replace `index.html`'s content with your real POS UI
+once this is confirmed; keep calling `window.dmsLicense.checkNow()` before
+letting a new Sale be created.
 
-Add the sync engine alongside the guard in `main-integration-example.js`:
+`main-integration-example.js` is kept only as an annotated reference showing
+where to add the sync engine — `main.js` is the one `npm start` actually runs.
+
+Add the sync engine alongside the guard in `main.js`:
 ```js
 const { SyncEngine } = require('./sync-engine');
 // after guard.init(localDb) succeeds:
-const syncEngine = new SyncEngine(localDb, guard.deviceId, 'https://api.yourdms.com');
+const syncEngine = new SyncEngine(localDb, guard.deviceId, process.env.DMS_CLOUD_API);
 syncEngine.startBackgroundLoop(30000);
 // expose to renderer via preload/ipc, e.g.:
 // ipcMain.handle('pos:createSale', (e, sale) => syncEngine.writeAndQueue('sales', sale));
