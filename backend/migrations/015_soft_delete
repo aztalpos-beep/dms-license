@@ -1,0 +1,16 @@
+-- Soft-delete support: deleted rows are never physically removed from the
+-- database. They are hidden from normal views immediately, shown in a
+-- "Trash" view for 3 days (branch-scoped), and after 3 days simply stop
+-- appearing in the Trash view — the row itself remains in the table forever.
+
+ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
+ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS deleted_by INTEGER REFERENCES users(id);
+
+ALTER TABLE vendors ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
+ALTER TABLE vendors ADD COLUMN IF NOT EXISTS deleted_by INTEGER REFERENCES users(id);
+
+ALTER TABLE daily_cashbook ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
+ALTER TABLE daily_cashbook ADD COLUMN IF NOT EXISTS deleted_by INTEGER REFERENCES users(id);
+
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS deleted_by INTEGER REFERENCES users(id);

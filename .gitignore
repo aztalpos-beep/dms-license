@@ -5,3 +5,8 @@ keys/
 *.db
 dms-local.db
 .DS_Store
+backend/node_modules/
+backend/node_modules_hide/
+frontend/node_modules/backend/uploads/
+ 
+backend/uploads/
