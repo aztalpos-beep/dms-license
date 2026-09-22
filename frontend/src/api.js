@@ -7,10 +7,13 @@ async function request(path, options = {}) {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   });
+
   const data = await res.json().catch(() => ({}));
+
   if (!res.ok) {
     throw new Error(data.error || 'Request failed.');
   }
+
   return data;
 }
 
@@ -18,6 +21,7 @@ async function request(path, options = {}) {
 // Use this for every call to a protected (post-login) endpoint.
 async function authedRequest(path, options = {}) {
   const token = getToken();
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
@@ -26,10 +30,21 @@ async function authedRequest(path, options = {}) {
       ...(options.headers || {}),
     },
   });
+
   const data = await res.json().catch(() => ({}));
+
   if (!res.ok) {
+    if (data.code === 'DEMO_TRIAL_EXPIRED' || data.demoExpired === true) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+
+      window.location.replace('/demo-expired');
+      return new Promise(() => {});
+    }
+
     throw new Error(data.error || 'Request failed.');
   }
+
   return data;
 }
 

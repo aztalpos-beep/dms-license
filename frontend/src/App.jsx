@@ -23,6 +23,7 @@ import ExpensesPage from './pages/ExpensesPage.jsx';
 import CashbookPage from './pages/CashbookPage.jsx';
 import ReportsPage from './pages/ReportsPage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
+import DemoExpired from './pages/DemoExpired.jsx';
 
 export default function App() {
   // Browser tab title
@@ -70,9 +71,11 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/login/:branchId" element={<BranchLogin />} />
+      
+        <Routes>
+  <Route path="/" element={<Landing />} />
+  <Route path="/demo-expired" element={<DemoExpired />} />
+  <Route path="/login/:branchId" element={<BranchLogin />} />
         <Route path="/admin-login" element={<SuperAdminLogin />} />
         <Route path="/dashboard" element={<DashboardPlaceholder />} />
         <Route path="/inventory" element={<InventoryList />} />
