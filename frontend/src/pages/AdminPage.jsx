@@ -7,6 +7,10 @@ import {
   updateUserPassword,
   getAdminBranches,
   createAdminBranch,
+  getDemoClients,
+  createDemoClient,
+  extendDemoTrial,
+  updateDemoClientStatus,
   getAuditLog,
 } from '../api.js';
 import { getUser } from '../auth.js';
@@ -16,6 +20,7 @@ const ROLES = ['manager', 'sales_staff', 'accountant', 'admin'];
 const TABS = [
   { key: 'users', label: 'Users & Roles' },
   { key: 'branches', label: 'Branches' },
+  { key: 'demo', label: 'Demo Clients' },
   { key: 'audit', label: 'Audit Log' },
 ];
 
@@ -69,6 +74,22 @@ export default function AdminPage() {
   const [auditRows, setAuditRows] = useState([]);
   const [error, setError] = useState('');
 
+  const [demoClients, setDemoClients] = useState([]);
+  const [showDemoForm, setShowDemoForm] = useState(false);
+  const [savingDemo, setSavingDemo] = useState(false);
+  const [demoActionId, setDemoActionId] = useState(null);
+  const [showDemoPassword, setShowDemoPassword] = useState(false);
+  const [createdDemo, setCreatedDemo] = useState(null);
+  const [demoForm, setDemoForm] = useState({
+    business_name: '',
+    owner_name: '',
+    phone: '',
+    city: '',
+    username: 'manager',
+    password: '',
+    trial_days: 3,
+  });
+
   const [showUserForm, setShowUserForm] = useState(false);
   const [userForm, setUserForm] = useState({
     name: '',
@@ -111,6 +132,12 @@ export default function AdminPage() {
       .catch((err) => setError(err.message));
   }
 
+  function loadDemoClients() {
+    getDemoClients()
+      .then((data) => setDemoClients(Array.isArray(data) ? data : []))
+      .catch((err) => setError(err.message));
+  }
+
   useEffect(() => {
     setError('');
 
@@ -121,6 +148,10 @@ export default function AdminPage() {
 
     if (tab === 'branches') {
       loadBranches();
+    }
+
+    if (tab === 'demo') {
+      loadDemoClients();
     }
 
     if (tab === 'audit') {
@@ -217,6 +248,121 @@ export default function AdminPage() {
     } finally {
       setSavingBranch(false);
     }
+  }
+
+  async function handleCreateDemoClient(e) {
+    e.preventDefault();
+    setSavingDemo(true);
+    setError('');
+    setCreatedDemo(null);
+
+    try {
+      const passwordUsed = demoForm.password;
+      const result = await createDemoClient({
+        ...demoForm,
+        trial_days: Number(demoForm.trial_days) || 3,
+      });
+
+      const demo = result.demo || {};
+
+      setCreatedDemo({
+        business_name: demo.business_name || demoForm.business_name,
+        username: demo.manager?.username || demoForm.username,
+        password: passwordUsed,
+        login_path: demo.login_path || `/login/${demo.branch_id}`,
+        expires_at: demo.demo_expires_at,
+      });
+
+      setDemoForm({
+        business_name: '',
+        owner_name: '',
+        phone: '',
+        city: '',
+        username: 'manager',
+        password: '',
+        trial_days: 3,
+      });
+
+      setShowDemoPassword(false);
+      setShowDemoForm(false);
+      loadDemoClients();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingDemo(false);
+    }
+  }
+
+  async function handleExtendDemo(client) {
+    const raw = window.prompt(
+      `How many days do you want to add for ${client.name}?`,
+      '3'
+    );
+
+    if (raw === null) return;
+
+    const days = Number(raw);
+
+    if (!Number.isInteger(days) || days < 1 || days > 30) {
+      setError('Extension must be between 1 and 30 days.');
+      return;
+    }
+
+    setDemoActionId(client.id);
+    setError('');
+
+    try {
+      await extendDemoTrial(client.id, days);
+      loadDemoClients();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDemoActionId(null);
+    }
+  }
+
+  async function handleDemoStatus(client) {
+    const nextStatus = !client.is_active;
+    const action = nextStatus ? 'enable' : 'disable';
+
+    if (!window.confirm(`Are you sure you want to ${action} ${client.name}?`)) {
+      return;
+    }
+
+    setDemoActionId(client.id);
+    setError('');
+
+    try {
+      await updateDemoClientStatus(client.id, nextStatus);
+      loadDemoClients();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDemoActionId(null);
+    }
+  }
+
+  function getDemoLoginUrl(clientOrCreated) {
+    const path =
+      clientOrCreated.login_path ||
+      `/login/${clientOrCreated.id || clientOrCreated.branch_id}`;
+
+    return `${window.location.origin}${path}`;
+  }
+
+  async function copyText(value) {
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      window.prompt('Copy this value:', value);
+    }
+  }
+
+  function formatDateTime(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleString();
   }
 
   const passwordWrapperStyle = {
@@ -664,6 +810,244 @@ export default function AdminPage() {
                 ))}
               </tbody>
             </table>
+          )}
+        </>
+      )}
+
+      {tab === 'demo' && (
+        <>
+          <div className="page-header" style={{ border: 'none', marginBottom: 12, gap: 12, alignItems: 'center' }}>
+            <div>
+              <h2 style={{ fontSize: 16, marginBottom: 4 }}>Demo Clients</h2>
+              <p style={{ margin: 0 }}>
+                Create and manage separate trial workspaces. Each client has its own branch, login, data, and expiry.
+              </p>
+            </div>
+
+            <button
+              className="btn primary"
+              onClick={() => {
+                setShowDemoForm((s) => !s);
+                setShowDemoPassword(false);
+              }}
+            >
+              {showDemoForm ? 'Cancel' : '+ Create Demo Client'}
+            </button>
+          </div>
+
+          {createdDemo && (
+            <div className="form-card" style={{ marginBottom: 20, border: '1px solid #86efac', background: '#f0fdf4' }}>
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>Demo client created successfully</div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, fontSize: 13 }}>
+                <div><strong>Business</strong><div>{createdDemo.business_name}</div></div>
+                <div><strong>Username</strong><div className="num">{createdDemo.username}</div></div>
+                <div><strong>Password</strong><div className="num">{createdDemo.password}</div></div>
+                <div><strong>Expires</strong><div>{formatDateTime(createdDemo.expires_at)}</div></div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+                <button type="button" className="btn" onClick={() => copyText(getDemoLoginUrl(createdDemo))}>
+                  Copy Login Link
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() =>
+                    copyText(
+                      `Demo ERP Login\nBusiness: ${createdDemo.business_name}\nURL: ${getDemoLoginUrl(createdDemo)}\nUsername: ${createdDemo.username}\nPassword: ${createdDemo.password}`
+                    )
+                  }
+                >
+                  Copy Credentials
+                </button>
+                <button type="button" className="btn ghost" onClick={() => setCreatedDemo(null)}>
+                  Dismiss
+                </button>
+              </div>
+
+              <div style={{ marginTop: 10, fontSize: 12, color: '#64748b' }}>
+                Save or send these credentials now. The password is not stored in readable form and cannot be shown again later.
+              </div>
+            </div>
+          )}
+
+          {showDemoForm && (
+            <form className="form-card" onSubmit={handleCreateDemoClient} style={{ marginBottom: 20 }}>
+              <div className="form-row">
+                <div className="field">
+                  <label>Business Name</label>
+                  <input
+                    value={demoForm.business_name}
+                    onChange={(e) => setDemoForm({ ...demoForm, business_name: e.target.value })}
+                    placeholder="e.g. ABC Motors"
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label>Owner Name</label>
+                  <input
+                    value={demoForm.owner_name}
+                    onChange={(e) => setDemoForm({ ...demoForm, owner_name: e.target.value })}
+                    placeholder="Owner / contact person"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="field">
+                  <label>Phone</label>
+                  <input
+                    value={demoForm.phone}
+                    onChange={(e) => setDemoForm({ ...demoForm, phone: e.target.value })}
+                    placeholder="03xx xxxxxxx"
+                  />
+                </div>
+                <div className="field">
+                  <label>City</label>
+                  <input
+                    value={demoForm.city}
+                    onChange={(e) => setDemoForm({ ...demoForm, city: e.target.value })}
+                    placeholder="e.g. Bahawalpur"
+                  />
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="field">
+                  <label>Username</label>
+                  <input
+                    value={demoForm.username}
+                    onChange={(e) => setDemoForm({ ...demoForm, username: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="field">
+                  <label>Password</label>
+                  <div style={passwordWrapperStyle}>
+                    <input
+                      type={showDemoPassword ? 'text' : 'password'}
+                      value={demoForm.password}
+                      onChange={(e) => setDemoForm({ ...demoForm, password: e.target.value })}
+                      minLength={6}
+                      autoComplete="new-password"
+                      required
+                      style={passwordInputStyle}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowDemoPassword((current) => !current)}
+                      aria-label={showDemoPassword ? 'Hide password' : 'Show password'}
+                      title={showDemoPassword ? 'Hide password' : 'Show password'}
+                      style={passwordButtonStyle}
+                    >
+                      {showDemoPassword ? <EyeOffIcon /> : <EyeIcon />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="field" style={{ maxWidth: 240 }}>
+                <label>Trial Days</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="30"
+                  value={demoForm.trial_days}
+                  onChange={(e) => setDemoForm({ ...demoForm, trial_days: e.target.value })}
+                  required
+                />
+              </div>
+
+              <button className="btn primary" type="submit" disabled={savingDemo}>
+                {savingDemo ? 'Creating Demo…' : 'Create Demo Client'}
+              </button>
+            </form>
+          )}
+
+          {demoClients.length === 0 ? (
+            <div className="empty-state">No demo clients found.</div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Client</th>
+                    <th>Manager</th>
+                    <th>Started</th>
+                    <th>Expires</th>
+                    <th>Remaining</th>
+                    <th>Status</th>
+                    <th>Login</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {demoClients.map((client) => (
+                    <tr key={client.id}>
+                      <td>
+                        <strong>{client.name}</strong>
+                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                          {[client.location, client.phone].filter(Boolean).join(' · ') || `Branch #${client.id}`}
+                        </div>
+                      </td>
+                      <td>
+                        <div>{client.manager_name || '—'}</div>
+                        <div className="num" style={{ fontSize: 11, color: '#64748b' }}>
+                          {client.manager_username || '—'}
+                        </div>
+                      </td>
+                      <td className="num">{formatDateTime(client.demo_started_at)}</td>
+                      <td className="num">{formatDateTime(client.demo_expires_at)}</td>
+                      <td>
+                        {client.trial_status === 'expired'
+                          ? '0 days'
+                          : `${client.days_remaining ?? 0} day${Number(client.days_remaining) === 1 ? '' : 's'}`}
+                      </td>
+                      <td>
+                        <span className={`badge ${client.trial_status === 'active' ? 'in_stock' : 'returned'}`}>
+                          {client.trial_status || '—'}
+                        </span>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn ghost"
+                          style={{ padding: '4px 8px', fontSize: 11 }}
+                          onClick={() => copyText(getDemoLoginUrl(client))}
+                        >
+                          Copy Link
+                        </button>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            className="btn ghost"
+                            style={{ padding: '4px 8px', fontSize: 11 }}
+                            disabled={demoActionId === client.id}
+                            onClick={() => handleExtendDemo(client)}
+                          >
+                            Extend
+                          </button>
+                          <button
+                            type="button"
+                            className="btn ghost"
+                            style={{ padding: '4px 8px', fontSize: 11 }}
+                            disabled={demoActionId === client.id}
+                            onClick={() => handleDemoStatus(client)}
+                          >
+                            {client.is_active ? 'Disable' : 'Enable'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </>
       )}

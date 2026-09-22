@@ -317,6 +317,34 @@ export function createAdminBranch(payload) {
 export function updateAdminBranch(id, payload) {
   return authedRequest(`/admin/branches/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
 }
+
+// ---- Demo Clients ----
+
+export function getDemoClients() {
+  return authedRequest('/admin/demo-clients');
+}
+
+export function createDemoClient(payload) {
+  return authedRequest('/admin/demo-clients', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function extendDemoTrial(id, days = 3) {
+  return authedRequest(`/admin/demo-clients/${id}/extend`, {
+    method: 'POST',
+    body: JSON.stringify({ days }),
+  });
+}
+
+export function updateDemoClientStatus(id, isActive) {
+  return authedRequest(`/admin/demo-clients/${id}/status`, {
+    method: 'PUT',
+    body: JSON.stringify({ is_active: isActive }),
+  });
+}
+
 export function getAuditLog() {
   return authedRequest('/admin/audit-log');
 }
