@@ -10,15 +10,17 @@ export default function SalesList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('all');
+  const [search, setSearch] = useState('');
 
-  function load(tab) {
+  function load(tab, searchTerm = search) {
     setLoading(true);
     setError('');
 
-    const filters =
-      tab === 'all'
-        ? {}
-        : { sale_category: tab };
+    const filters = {};
+    if (tab !== 'all') filters.sale_category = tab;
+
+    const trimmedSearch = searchTerm.trim();
+    if (trimmedSearch) filters.search = trimmedSearch;
 
     getSales(filters)
       .then(setSales)
@@ -27,9 +29,13 @@ export default function SalesList() {
   }
 
   useEffect(() => {
-    load(activeTab);
+    const timer = setTimeout(() => {
+      load(activeTab, search);
+    }, 300);
+
+    return () => clearTimeout(timer);
     // eslint-disable-next-line
-  }, [activeTab]);
+  }, [activeTab, search]);
 
   async function handleDelete(e, sale) {
     e.preventDefault();
@@ -48,7 +54,7 @@ export default function SalesList() {
 
       await deleteSale(sale.id);
 
-      load(activeTab);
+      load(activeTab, search);
     } catch (err) {
       // If the backend rejects this (e.g. insufficient role), the error
       // message from the API is shown here — authorization is enforced
@@ -126,6 +132,43 @@ export default function SalesList() {
         </button>
       </div>
 
+      <div style={{ marginBottom: 16, maxWidth: 620, position: 'relative' }}>
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by customer name, phone, CNIC or receipt no..."
+          aria-label="Search sales"
+          style={{
+            width: '100%',
+            height: 42,
+            padding: search ? '0 82px 0 14px' : '0 14px',
+            border: '1.5px solid var(--line-light)',
+            borderRadius: 8,
+            background: '#fff',
+            fontSize: 13,
+            outline: 'none',
+          }}
+        />
+        {search && (
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={() => setSearch('')}
+            style={{
+              position: 'absolute',
+              right: 6,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              padding: '5px 10px',
+              fontSize: 11,
+            }}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
       {error && (
         <div
           className="login-error"
@@ -146,7 +189,7 @@ export default function SalesList() {
         </p>
       ) : sales.length === 0 ? (
         <div className="empty-state">
-          No sales recorded yet.
+          {search ? `No sales found for "${search}".` : 'No sales recorded yet.'}
         </div>
       ) : (
         <div className="table-wrap">
